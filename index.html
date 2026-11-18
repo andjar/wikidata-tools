@@ -3,231 +3,105 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reference URL → QuickStatements</title>
+<title>Wikidata tools</title>
+<meta name="description" content="Small browser-based tools for batch work on Wikidata: add statements from reference URLs, tidy references, and build follows/followed by chains.">
+<script>
+  // Links to the old tool (index.html?url=…&pairs=…) still work: send them to the tool's new page.
+  if (/[?&](url|pairs)=/.test(location.search)) location.replace('url-to-quickstatements.html' + location.search);
+</script>
 <style>
-  :root { --fg:#1d2433; --muted:#5b6475; --line:#d7dce5; --accent:#3366cc; --bg:#f7f8fa; }
+  :root { --fg:#1d2433; --muted:#5b6475; --line:#d7dce5; --accent:#3366cc; --bg:#f7f8fa;
+          --tag:#eef1f6; --edit:#fdf1de; --editfg:#8a4f00; --qs:#e8effc; --qsfg:#2a55a8; }
   * { box-sizing: border-box; }
-  body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg);
-         background: var(--bg); margin: 0; padding: 2rem 1rem; }
-  main { max-width: 860px; margin: 0 auto; background: #fff; border: 1px solid var(--line);
-         border-radius: 10px; padding: 1.5rem 2rem 2rem; }
-  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
-  p.lead { color: var(--muted); margin-top: 0; }
-  label { display: block; font-weight: 600; margin: 1.1rem 0 .3rem; }
-  .hint { font-weight: 400; color: var(--muted); font-size: .88rem; }
-  input[type=text], textarea { width: 100%; padding: .55rem .65rem; border: 1px solid var(--line);
-         border-radius: 6px; font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  textarea { resize: vertical; }
-  .checks { margin-top: 1rem; display: grid; gap: .35rem; }
-  .checks label { font-weight: 400; margin: 0; display: flex; gap: .5rem; align-items: baseline; }
-  .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1.3rem; align-items: center; }
-  button, a.btn { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: .55rem 1rem;
-         font: inherit; cursor: pointer; text-decoration: none; display: inline-block; }
-  button.secondary, a.btn.secondary { background: #eef1f6; color: var(--fg); }
-  button:disabled { opacity: .5; cursor: default; }
-  #status { color: var(--muted); font-size: .9rem; }
-  #output { min-height: 14rem; margin-top: .5rem; white-space: pre; }
-  details { margin-top: 1rem; }
-  summary { cursor: pointer; color: var(--muted); }
-  table { border-collapse: collapse; width: 100%; font-size: .88rem; margin-top: .5rem; }
-  td, th { border-bottom: 1px solid var(--line); padding: .3rem .4rem; text-align: left; vertical-align: top; }
-  td.url { word-break: break-all; color: var(--muted); }
-  .skip { color: #a15c00; }
+  body { font: 16px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg);
+         background: var(--bg); margin: 0; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 1.25rem; }
+  header { padding: 3.5rem 0 2rem; }
+  header h1 { font-size: 2rem; margin: 0 0 .5rem; letter-spacing: -.01em; }
+  header p { color: var(--muted); font-size: 1.08rem; max-width: 640px; margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.1rem; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 1.4rem 1.4rem 1.2rem;
+          display: flex; flex-direction: column; transition: border-color .15s, box-shadow .15s; }
+  .card:hover { border-color: #b7c3d9; box-shadow: 0 4px 16px rgba(30, 50, 90, .07); }
+  .icon { width: 42px; height: 42px; border-radius: 10px; background: var(--tag); display: grid; place-items: center;
+          font-size: 1.3rem; margin-bottom: .9rem; }
+  .card h2 { font-size: 1.15rem; margin: 0 0 .4rem; }
+  .card p { margin: 0 0 .8rem; color: #3a4252; font-size: .95rem; }
+  .card .example { color: var(--muted); font-size: .88rem; border-left: 3px solid var(--line); padding-left: .7rem; }
+  .tags { display: flex; flex-wrap: wrap; gap: .35rem; margin: auto 0 1rem; padding-top: .4rem; }
+  .tag { font-size: .76rem; padding: .12rem .55rem; border-radius: 99px; background: var(--tag); color: var(--muted); }
+  .tag.qs { background: var(--qs); color: var(--qsfg); }
+  .tag.edit { background: var(--edit); color: var(--editfg); }
+  .open { align-self: flex-start; background: var(--accent); color: #fff; text-decoration: none; padding: .5rem 1rem;
+          border-radius: 7px; font-weight: 600; font-size: .95rem; }
+  .open:hover { background: #2a55a8; }
+  section.notes { margin: 3rem 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; }
+  section.notes h3 { font-size: 1rem; margin: 0 0 .35rem; }
+  section.notes p { margin: 0; color: var(--muted); font-size: .93rem; }
+  code { font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--tag); padding: .05rem .3rem; border-radius: 4px; }
+  footer { margin: 3.5rem 0 0; padding: 1.5rem 0 2.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .88rem; }
+  footer a, section.notes a { color: var(--accent); }
 </style>
 </head>
 <body>
-<main>
-  <h1>Reference URL → QuickStatements</h1>
-  <p class="lead">Finds Wikidata items that cite a URL (or any page under it) and generates QuickStatements
-    that add fixed property/value pairs to them — e.g. <em>described by source</em> (P1343) for people found in an nb.no book.</p>
+<div class="wrap">
+  <header>
+    <h1>Wikidata tools</h1>
+    <p>Small tools for the repetitive parts of Wikidata editing. Each one is a single page that runs in your
+      browser. Most of them produce QuickStatements for you to check before anything is edited.</p>
+  </header>
 
-  <label for="url">URL prefix <span class="hint">— every reference URL starting with this matches</span></label>
-  <input type="text" id="url" placeholder="https://www.nb.no/items/URN:NBN:no-nb_digibok_2008012404027">
+  <div class="grid">
+    <article class="card">
+      <div class="icon" aria-hidden="true">📚</div>
+      <h2>Reference URL → QuickStatements</h2>
+      <p>Finds every item that cites a URL, or any page under it, and adds the same statements to all of them.</p>
+      <p class="example">Everyone whose references point into an nb.no book gets <em>described by source</em> (P1343) = that book.</p>
+      <div class="tags"><span class="tag qs">QuickStatements</span><span class="tag">humans-only filter</span><span class="tag">skips existing</span></div>
+      <a class="open" href="url-to-quickstatements.html">Open tool →</a>
+    </article>
 
-  <label for="pairs">Statements to add <span class="hint">— one per line: property, value, optional qualifiers (tab, | or space separated)</span></label>
-  <textarea id="pairs" rows="3" placeholder="P1343|Q12345">P1343|Q</textarea>
+    <article class="card">
+      <div class="icon" aria-hidden="true">🔖</div>
+      <h2>Reference fixer</h2>
+      <p>Adds properties to <em>existing</em> references whose reference URL matches a prefix. The statement,
+        its qualifiers and its other references are left untouched. You check every change in a preview first.</p>
+      <p class="example">References to <code>nrk.no</code> that only have a reference URL get <em>stated in</em> (P248) = NRK.</p>
+      <div class="tags"><span class="tag edit">edits directly (OAuth token)</span><span class="tag">per-reference preview</span></div>
+      <a class="open" href="reference-fixer.html">Open tool →</a>
+    </article>
 
-  <div class="checks">
-    <label><input type="checkbox" id="onlyHumans" checked> Only items that are instance of human (P31 = Q5)</label>
-    <label><input type="checkbox" id="skipExisting" checked> Skip items that already have the statement</label>
-    <label><input type="checkbox" id="addRef" checked> Add the matched URL as reference (S854)</label>
+    <article class="card">
+      <div class="icon" aria-hidden="true">🔗</div>
+      <h2>Chain builder</h2>
+      <p>Loads items with SPARQL, lets you drag them into order, and writes the <em>follows</em> / <em>followed by</em> links.
+        Links that already exist are locked, and breaks mark gaps or unknown items.</p>
+      <p class="example">Books in a series (qualifiers on P179), elections, or office holders with replaces/replaced by.</p>
+      <div class="tags"><span class="tag qs">QuickStatements</span><span class="tag">drag &amp; drop</span><span class="tag">item or qualifier mode</span></div>
+      <a class="open" href="chain-builder.html">Open tool →</a>
+    </article>
   </div>
 
-  <div class="row">
-    <button id="run">Find items</button>
-    <span id="status"></span>
-  </div>
+  <section class="notes">
+    <div>
+      <h3>Runs in your browser</h3>
+      <p>No server, no account and no tracking. The pages talk directly to the Wikidata API and the query service.</p>
+    </div>
+    <div>
+      <h3>You review before anything changes</h3>
+      <p>The QuickStatements tools only produce commands. You run them yourself in
+        <a href="https://quickstatements.toolforge.org/" target="_blank" rel="noopener">QuickStatements</a>.
+        The reference fixer shows every change and edits only the rows you select.</p>
+    </div>
+    <div>
+      <h3>Shareable setups</h3>
+      <p>Every tool reads its settings from the page link, so you can bookmark one setup per source, series or office.</p>
+    </div>
+  </section>
 
-  <label for="output">QuickStatements (v1)</label>
-  <textarea id="output" rows="14" readonly></textarea>
-
-  <div class="row">
-    <a id="openQs" class="btn" target="_blank" rel="noopener">Open in QuickStatements</a>
-    <button id="copy" class="secondary">Copy</button>
-    <button id="download" class="secondary">Download .txt</button>
-    <button id="share" class="secondary">Copy link to this setup</button>
-  </div>
-
-  <details id="detailsBox">
-    <summary>Matched items</summary>
-    <table><thead><tr><th>Item</th><th>Label</th><th>Matched URL(s)</th><th></th></tr></thead>
-      <tbody id="matches"></tbody></table>
-  </details>
-</main>
-
-<script>
-const API = 'https://www.wikidata.org/w/api.php';
-const $ = id => document.getElementById(id);
-
-async function api(params) {
-  const u = new URL(API);
-  for (const [k, v] of Object.entries({ ...params, format: 'json', formatversion: 2, origin: '*' }))
-    u.searchParams.set(k, v);
-  const r = await fetch(u);
-  if (!r.ok) throw new Error(`API error ${r.status}`);
-  const d = await r.json();
-  if (d.error) throw new Error(d.error.info || d.error.code);
-  return d;
-}
-
-function parsePairs(text) {
-  return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-    const toks = /[\t|]/.test(l) ? l.split(/\s*[\t|]\s*/) : l.split(/\s+/);
-    if (toks.length < 2 || !/^P\d+$/i.test(toks[0])) throw new Error(`Bad statement line: "${l}"`);
-    toks[0] = toks[0].toUpperCase();
-    if (/^q\d+$/i.test(toks[1])) toks[1] = toks[1].toUpperCase();
-    return toks;
-  });
-}
-
-// Strip protocol, lowercase for comparison.
-const norm = u => u.replace(/^[a-z]+:\/\//i, '').toLowerCase();
-
-// All pages in main namespace linking to URLs under the prefix (uses the externallinks index,
-// which includes URLs used in statements and references).
-async function findLinks(prefix, onProgress) {
-  const m = prefix.match(/^([a-z]+):\/\/(.*)$/i);
-  const protocols = m ? [m[1].toLowerCase()] : ['https', 'http'];
-  const query = m ? m[2] : prefix;
-  const want = norm(query);
-  const byItem = new Map();
-  for (const protocol of protocols) {
-    let cont = { continue: '' };
-    while (cont) {
-      const d = await api({ action: 'query', list: 'exturlusage', euquery: query, euprotocol: protocol,
-                            eunamespace: 0, eulimit: 500, euprop: 'title|url', ...cont });
-      for (const e of d.query.exturlusage) {
-        if (!norm(e.url).startsWith(want)) continue;
-        if (!byItem.has(e.title)) byItem.set(e.title, new Set());
-        byItem.get(e.title).add(e.url);
-      }
-      onProgress(byItem.size);
-      cont = d.continue || null;
-    }
-  }
-  return byItem;
-}
-
-async function getEntities(ids, onProgress) {
-  const out = {};
-  for (let i = 0; i < ids.length; i += 50) {
-    const d = await api({ action: 'wbgetentities', ids: ids.slice(i, i + 50).join('|'),
-                          props: 'claims|labels', languages: 'nb|nn|en' });
-    Object.assign(out, d.entities);
-    onProgress(Math.min(i + 50, ids.length), ids.length);
-  }
-  return out;
-}
-
-const claimValues = (ent, prop) => (ent.claims?.[prop] || []).map(c => {
-  const v = c.mainsnak?.datavalue?.value;
-  return v == null ? null : typeof v === 'object' ? (v.id ?? JSON.stringify(v)) : String(v);
-});
-const stripQuotes = s => s.replace(/^"(.*)"$/, '$1');
-const label = ent => { const l = ent.labels || {}; return (l.nb || l.nn || l.en || {}).value || ''; };
-
-let lastOutput = '';
-
-async function run() {
-  const prefix = $('url').value.trim();
-  if (!prefix) return alert('Enter a URL prefix.');
-  let pairs;
-  try { pairs = parsePairs($('pairs').value); } catch (e) { return alert(e.message); }
-  if (!pairs.length) return alert('Add at least one statement line.');
-  if (pairs.some(p => /^Q$/i.test(p[1]))) return alert('Fill in the item ID (e.g. P1343|Q12345).');
-
-  const btn = $('run'); btn.disabled = true;
-  const status = s => $('status').textContent = s;
-  $('matches').innerHTML = ''; setOutput('');
-  try {
-    status('Searching reference URLs…');
-    const byItem = await findLinks(prefix, n => status(`Searching reference URLs… ${n} items`));
-    const ids = [...byItem.keys()].filter(t => /^Q\d+$/.test(t));
-    if (!ids.length) { status('No items found.'); return; }
-
-    const ents = await getEntities(ids, (a, b) => status(`Checking items… ${a}/${b}`));
-    const lines = [], rows = [];
-    let kept = 0;
-    for (const id of ids) {
-      const ent = ents[id] || {};
-      const urls = [...byItem.get(id)];
-      let reason = '';
-      if ($('onlyHumans').checked && !claimValues(ent, 'P31').includes('Q5')) reason = 'not human';
-      const todo = reason ? [] : pairs.filter(([p, v]) =>
-        !($('skipExisting').checked && claimValues(ent, p).includes(stripQuotes(v))));
-      if (!reason && !todo.length) reason = 'already has statement';
-      if (!reason) {
-        kept++;
-        for (const pair of todo) {
-          let line = [id, ...pair].join('\t');
-          if ($('addRef').checked) line += '\tS854\t"' + urls[0].replace(/"/g, '%22') + '"';
-          lines.push(line);
-        }
-      }
-      rows.push(`<tr${reason ? ' class="skip"' : ''}><td><a href="https://www.wikidata.org/wiki/${id}" target="_blank">${id}</a></td>`
-        + `<td>${esc(label(ent))}</td><td class="url">${urls.map(esc).join('<br>')}</td><td>${reason ? 'skipped: ' + reason : ''}</td></tr>`);
-    }
-    $('matches').innerHTML = rows.join('');
-    $('detailsBox').open = true;
-    setOutput(lines.join('\n'));
-    status(`${ids.length} items cite this URL; ${kept} get statements (${lines.length} lines).`);
-  } catch (e) {
-    status('Error: ' + e.message);
-  } finally { btn.disabled = false; }
-}
-
-function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-
-function setOutput(text) {
-  lastOutput = text;
-  $('output').value = text;
-  const qs = text.replace(/\t/g, '|').replace(/\n/g, '||');
-  $('openQs').href = 'https://quickstatements.toolforge.org/#/v1=' + encodeURIComponent(qs);
-  $('openQs').style.pointerEvents = text ? '' : 'none';
-  $('openQs').style.opacity = text ? '' : '.5';
-}
-
-$('run').onclick = run;
-$('copy').onclick = () => navigator.clipboard.writeText(lastOutput);
-$('download').onclick = () => {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([lastOutput + '\n'], { type: 'text/plain' }));
-  a.download = 'quickstatements.txt'; a.click();
-};
-$('share').onclick = () => {
-  const u = new URL(location.href.split('?')[0]);
-  u.searchParams.set('url', $('url').value.trim());
-  u.searchParams.set('pairs', $('pairs').value.trim());
-  navigator.clipboard.writeText(u.toString());
-  $('status').textContent = 'Link copied.';
-};
-
-// Prefill from ?url=…&pairs=… (pairs: newline-separated) and auto-run if both given.
-const qp = new URLSearchParams(location.search);
-if (qp.get('url')) $('url').value = qp.get('url');
-if (qp.get('pairs')) $('pairs').value = qp.get('pairs');
-setOutput('');
-if (qp.get('url') && qp.get('pairs')) run();
-</script>
+  <footer>
+    Source on <a href="https://github.com/andjar/wikidata-tools">GitHub</a>. Issues and suggestions are welcome.
+  </footer>
+</div>
 </body>
 </html>

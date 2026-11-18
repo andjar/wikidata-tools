@@ -60,14 +60,15 @@
   .sortable-ghost { opacity: .35; }
   #output { min-height: 12rem; white-space: pre; margin-top: .4rem; }
   .legend span { margin-right: .5rem; }
+  nav.back { max-width: 900px; margin: 0 auto .6rem; font-size: .9rem; } nav.back a { color: var(--accent); text-decoration: none; }
 </style>
 </head>
 <body>
+<nav class="back"><a href="index.html">← All tools</a></nav>
 <main>
   <h1>Chain builder</h1>
   <p class="lead">Load items with SPARQL, drag them into order, and get QuickStatements for <em>follows</em> / <em>followed by</em>.
-    Items that are already linked on Wikidata are locked together, and breaks mark gaps or uncertain links.
-    <a href="index.html">Other tools</a></p>
+    Items that are already linked on Wikidata are locked together, and breaks mark gaps or uncertain links.</p>
 
   <label for="query">SPARQL query <span class="hint">— must return <code>?item</code>. <code>?itemLabel</code> and any other columns
     are shown to help with ordering. The query's ORDER BY sets the starting order.</span></label>
