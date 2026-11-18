@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference fixer — add properties to references by URL</title>
+<style>
+  :root { --fg:#1d2433; --muted:#5b6475; --line:#d7dce5; --accent:#3366cc; --bg:#f7f8fa; --add:#e6f4ea; --addfg:#1e6b34; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg);
+         background: var(--bg); margin: 0; padding: 2rem 1rem; }
+  main { max-width: 1000px; margin: 0 auto; background: #fff; border: 1px solid var(--line);
+         border-radius: 10px; padding: 1.5rem 2rem 2rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 1.8rem 0 .2rem; border-top: 1px solid var(--line); padding-top: 1.2rem; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  label { display: block; font-weight: 600; margin: 1.1rem 0 .3rem; }
+  .hint { font-weight: 400; color: var(--muted); font-size: .88rem; }
+  input[type=text], input[type=password], textarea { width: 100%; padding: .55rem .65rem; border: 1px solid var(--line);
+         border-radius: 6px; font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  textarea { resize: vertical; }
+  .checks { margin-top: 1rem; display: grid; gap: .35rem; }
+  .checks label { font-weight: 400; margin: 0; display: flex; gap: .5rem; align-items: baseline; }
+  .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; align-items: center; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: .55rem 1rem;
+         font: inherit; cursor: pointer; }
+  button.secondary { background: #eef1f6; color: var(--fg); }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { color: var(--muted); font-size: .9rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .86rem; margin-top: .8rem; }
+  td, th { border-bottom: 1px solid var(--line); padding: .35rem .4rem; text-align: left; vertical-align: top; }
+  th { position: sticky; top: 0; background: #fff; }
+  .snak { display: block; word-break: break-all; }
+  .snak.added { background: var(--add); color: var(--addfg); border-radius: 3px; padding: 0 .25rem; }
+  .ok { color: var(--addfg); } .err { color: #b3261e; } .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  #tableWrap { max-height: 60vh; overflow: auto; }
+  nav.back { max-width: 1000px; margin: 0 auto .6rem; font-size: .9rem; } nav.back a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<nav class="back"><a href="index.html">← All tools</a></nav>
+<main>
+  <h1>Reference fixer</h1>
+  <p class="lead">Finds references whose <em>reference URL</em> (P854) starts with a given prefix, and adds properties
+    to <strong>those references</strong>, e.g. <em>stated in</em> (P248) = NRK. It edits the existing reference
+    (<code>wbsetreference</code>), so the statement, its qualifiers and its other references stay as they are.</p>
+
+  <label for="url">Reference URL prefix</label>
+  <input type="text" id="url" placeholder="https://www.nrk.no/">
+
+  <label for="adds">Properties to add to each matching reference
+    <span class="hint">— one per line: <code>P248|Q123</code>, <code>P123|"string"</code> or <code>P577|+2024-05-01T00:00:00Z/11</code></span></label>
+  <textarea id="adds" rows="3" placeholder="P248|Q…">P248|Q</textarea>
+
+  <div class="checks">
+    <label><input type="checkbox" id="skipIfProp" checked> Leave a property alone if the reference already has it (any value)</label>
+  </div>
+
+  <div class="row">
+    <button id="scan">Find references</button>
+    <button id="stop" class="secondary" disabled>Stop</button>
+    <span id="scanStatus" class="status"></span>
+  </div>
+
+  <div id="results" hidden>
+    <h2>Preview</h2>
+    <div class="row">
+      <label style="margin:0;font-weight:400"><input type="checkbox" id="selAll" checked> Select all</label>
+      <span id="count" class="status"></span>
+    </div>
+    <div id="tableWrap">
+      <table><thead><tr><th></th><th>Item</th><th>Statement</th><th>Reference after edit</th><th>Result</th></tr></thead>
+        <tbody id="rows"></tbody></table>
+    </div>
+
+    <h2>Apply edits</h2>
+    <p class="hint">Edits are made with your Wikidata account through an OAuth 2.0 access token.
+      To get one, <a href="https://meta.wikimedia.org/wiki/Special:OAuthConsumerRegistration/propose/oauth2" target="_blank" rel="noopener">register an
+      owner-only OAuth 2.0 consumer</a>: tick “This consumer is for use only by …”, and choose the grants
+      <em>Basic rights</em> and <em>Edit existing pages</em>. Owner-only consumers are approved automatically.
+      Copy the <strong>access token</strong> you are shown. The token goes only to wikidata.org.</p>
+    <label for="token">Access token</label>
+    <input type="password" id="token" autocomplete="off">
+    <div class="checks">
+      <label><input type="checkbox" id="remember"> Remember the token in this browser (localStorage)</label>
+    </div>
+    <label for="summary">Edit summary</label>
+    <input type="text" id="summary" value="Adding stated in to reference based on reference URL">
+    <div class="row">
+      <button id="check" class="secondary">Check token</button>
+      <button id="apply">Apply selected edits</button>
+      <button id="stopApply" class="secondary" disabled>Stop</button>
+      <span id="applyStatus" class="status"></span>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = 'https://www.wikidata.org/w/api.php';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const norm = u => u.replace(/^[a-z]+:\/\//i, '').toLowerCase();
+
+let stopFlag = false;
+let plan = [];          // one entry per reference to edit
+let labels = {};        // Q-id → label, for display
+
+// ---------- API helpers ----------
+async function apiGet(params) {
+  const u = new URL(API);
+  for (const [k, v] of Object.entries({ ...params, format: 'json', formatversion: 2, origin: '*' })) u.searchParams.set(k, v);
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  if (d.error) throw new Error(d.error.info || d.error.code);
+  return d;
+}
+
+// Authenticated request: OAuth 2 bearer token + crossorigin (MediaWiki ≥ 1.44).
+async function apiAuth(params, post = false) {
+  const token = $('token').value.trim();
+  if (!token) throw new Error('No access token');
+  const u = new URL(API);
+  u.searchParams.set('crossorigin', '');
+  const body = new URLSearchParams({ ...params, format: 'json', formatversion: 2 });
+  let r;
+  if (post) {
+    r = await fetch(u, { method: 'POST', body, headers: { Authorization: 'Bearer ' + token } });
+  } else {
+    for (const [k, v] of body) u.searchParams.set(k, v);
+    r = await fetch(u, { headers: { Authorization: 'Bearer ' + token } });
+  }
+  const d = await r.json().catch(() => { throw new Error(`HTTP ${r.status}`); });
+  if (d.error) { const e = new Error(d.error.info || d.error.code); e.code = d.error.code; throw e; }
+  return d;
+}
+
+// ---------- parsing the properties to add ----------
+function parseValue(raw) {
+  const v = raw.trim();
+  let m;
+  if ((m = v.match(/^Q(\d+)$/i)))
+    return { type: 'wikibase-entityid', value: { 'entity-type': 'item', 'numeric-id': +m[1], id: 'Q' + m[1] } };
+  if ((m = v.match(/^"(.*)"$/s))) return { type: 'string', value: m[1] };
+  if ((m = v.match(/^([+-]\d{4,}-\d\d-\d\dT00:00:00Z)\/(\d+)$/)))
+    return { type: 'time', value: { time: m[1], timezone: 0, before: 0, after: 0, precision: +m[2],
+             calendarmodel: 'http://www.wikidata.org/entity/Q1985727' } };
+  throw new Error(`Unsupported value "${v}" — use Q123, "text" or +2024-05-01T00:00:00Z/11`);
+}
+
+function parseAdds(text) {
+  return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const [p, ...rest] = l.split('|');
+    const prop = p.trim().toUpperCase();
+    if (!/^P\d+$/.test(prop) || !rest.length) throw new Error(`Bad line: "${l}" (expected P248|Q123)`);
+    if (/^Q$/i.test(rest.join('|').trim())) throw new Error('Fill in the item ID (e.g. P248|Q12345).');
+    return { property: prop, datavalue: parseValue(rest.join('|')) };
+  });
+}
+
+const sameValue = (a, b) => JSON.stringify(a?.value?.id ?? a?.value) === JSON.stringify(b?.value?.id ?? b?.value);
+
+function snakText(prop, snak) {
+  if (snak.snaktype !== 'value') return `${prop}: (${snak.snaktype})`;
+  const v = snak.datavalue.value;
+  if (v && v.id) return `${prop}: ${v.id}${labels[v.id] ? ' (' + labels[v.id] + ')' : ''}`;
+  if (v && v.time) return `${prop}: ${v.time.replace(/T.*/, '')}`;
+  if (v && v.amount) return `${prop}: ${v.amount}`;
+  if (v && v.text) return `${prop}: ${v.text}`;
+  return `${prop}: ${typeof v === 'string' ? v : JSON.stringify(v)}`;
+}
+
+// ---------- scan ----------
+async function findItems(prefix, status) {
+  const m = prefix.match(/^([a-z]+):\/\/(.*)$/i);
+  const protocols = m ? [m[1].toLowerCase()] : ['https', 'http'];
+  const query = m ? m[2] : prefix;
+  const items = new Set();
+  for (const protocol of protocols) {
+    let cont = { continue: '' };
+    while (cont && !stopFlag) {
+      const d = await apiGet({ action: 'query', list: 'exturlusage', euquery: query, euprotocol: protocol,
+                               eunamespace: 0, eulimit: 500, euprop: 'title', ...cont });
+      d.query.exturlusage.forEach(e => /^Q\d+$/.test(e.title) && items.add(e.title));
+      status(`Finding items… ${items.size}`);
+      cont = d.continue || null;
+    }
+  }
+  return [...items];
+}
+
+async function scan() {
+  const prefix = $('url').value.trim();
+  if (!prefix) return alert('Enter a URL prefix.');
+  let adds;
+  try { adds = parseAdds($('adds').value); } catch (e) { return alert(e.message); }
+  if (!adds.length) return alert('Add at least one property line.');
+
+  const want = norm(prefix);
+  const status = s => $('scanStatus').textContent = s;
+  stopFlag = false; plan = []; labels = {};
+  $('scan').disabled = true; $('stop').disabled = false;
+  try {
+    const ids = await findItems(prefix, status);
+    for (let i = 0; i < ids.length && !stopFlag; i += 50) {
+      const d = await apiGet({ action: 'wbgetentities', ids: ids.slice(i, i + 50).join('|'),
+                               props: 'claims|labels|info', languages: 'nb|nn|en' });
+      for (const [id, ent] of Object.entries(d.entities)) {
+        const l = ent.labels || {}; labels[id] = (l.nb || l.nn || l.en || {}).value || '';
+        for (const [prop, claims] of Object.entries(ent.claims || {})) {
+          for (const claim of claims) {
+            for (const ref of claim.references || []) {
+              const urls = (ref.snaks.P854 || []).map(s => s.datavalue?.value).filter(Boolean);
+              const url = urls.find(u => norm(u).startsWith(want));
+              if (!url) continue;
+              const toAdd = adds.filter(a => {
+                const existing = ref.snaks[a.property] || [];
+                if ($('skipIfProp').checked && existing.length) return false;
+                return !existing.some(s => sameValue(s.datavalue, a.datavalue));
+              });
+              if (!toAdd.length) continue;
+              plan.push({ item: id, revid: ent.lastrevid, prop, claim, ref, url, toAdd, selected: true, result: '' });
+            }
+          }
+        }
+      }
+      status(`Checking items… ${Math.min(i + 50, ids.length)}/${ids.length} — ${plan.length} references to fix`);
+    }
+    await fetchLabels(adds);
+    render();
+    status(`${stopFlag ? 'Stopped. ' : ''}${ids.length} items cite this prefix; ${plan.length} references need changes.`);
+  } catch (e) {
+    status('Error: ' + e.message);
+  } finally { $('scan').disabled = false; $('stop').disabled = true; }
+}
+
+// Labels for added items and statement values (display only).
+async function fetchLabels(adds) {
+  const need = new Set(adds.map(a => a.datavalue.value?.id).filter(Boolean));
+  plan.forEach(p => { const id = p.claim.mainsnak.datavalue?.value?.id; if (id) need.add(id); need.add(p.prop); });
+  const ids = [...need].filter(id => !(id in labels));
+  for (let i = 0; i < ids.length; i += 50) {
+    const d = await apiGet({ action: 'wbgetentities', ids: ids.slice(i, i + 50).join('|'), props: 'labels', languages: 'nb|nn|en' });
+    for (const [id, ent] of Object.entries(d.entities)) { const l = ent.labels || {}; labels[id] = (l.nb || l.nn || l.en || {}).value || ''; }
+  }
+}
+
+function render() {
+  $('results').hidden = false;
+  $('rows').innerHTML = plan.map((p, i) => {
+    const main = p.claim.mainsnak;
+    const old = Object.entries(p.ref.snaks).flatMap(([pr, ss]) => ss.map(s => `<span class="snak">${esc(snakText(pr, s))}</span>`));
+    const added = p.toAdd.map(a => `<span class="snak added">+ ${esc(snakText(a.property, { snaktype: 'value', datavalue: a.datavalue }))}</span>`);
+    return `<tr><td><input type="checkbox" data-i="${i}" ${p.selected ? 'checked' : ''}></td>`
+      + `<td><a href="https://www.wikidata.org/wiki/${p.item}#${p.prop}" target="_blank">${p.item}</a><br><span class="muted">${esc(labels[p.item] || '')}</span></td>`
+      + `<td>${esc(snakText(p.prop + (labels[p.prop] ? ' ' + labels[p.prop] : ''), main))}</td>`
+      + `<td>${old.join('')}${added.join('')}</td><td id="res${i}">${p.result}</td></tr>`;
+  }).join('');
+  $('rows').querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { plan[cb.dataset.i].selected = cb.checked; updateCount(); });
+  updateCount();
+}
+
+function updateCount() {
+  const n = plan.filter(p => p.selected).length;
+  $('count').textContent = `${n} of ${plan.length} selected`;
+}
+
+// ---------- apply ----------
+async function checkToken() {
+  try {
+    const d = await apiAuth({ action: 'query', meta: 'userinfo' });
+    $('applyStatus').textContent = d.query.userinfo.anon ? 'Token not accepted (anonymous).' : `Logged in as ${d.query.userinfo.name}.`;
+    return !d.query.userinfo.anon;
+  } catch (e) { $('applyStatus').textContent = 'Token error: ' + e.message; return false; }
+}
+
+const cleanSnak = s => ({ snaktype: s.snaktype, property: s.property, ...(s.datavalue ? { datavalue: s.datavalue } : {}) });
+
+async function apply() {
+  const todo = plan.map((p, i) => [p, i]).filter(([p]) => p.selected && !p.done);
+  if (!todo.length) return alert('Nothing selected.');
+  if (!confirm(`Edit ${todo.length} references on Wikidata?`)) return;
+  if ($('remember').checked) localStorage.setItem('wdRefFixerToken', $('token').value.trim());
+  if (!(await checkToken())) return;
+
+  stopFlag = false;
+  $('apply').disabled = true; $('stopApply').disabled = false;
+  const status = s => $('applyStatus').textContent = s;
+  let ok = 0, fail = 0;
+  try {
+    let csrf = (await apiAuth({ action: 'query', meta: 'tokens', type: 'csrf' })).query.tokens.csrftoken;
+    const revids = {};
+    for (const [n, [p, i]] of todo.entries()) {
+      if (stopFlag) break;
+      const snaks = {};
+      for (const [pr, ss] of Object.entries(p.ref.snaks)) snaks[pr] = ss.map(cleanSnak);
+      for (const a of p.toAdd) (snaks[a.property] ||= []).push({ snaktype: 'value', property: a.property, datavalue: a.datavalue });
+      const order = [...(p.ref['snaks-order'] || Object.keys(p.ref.snaks))];
+      p.toAdd.forEach(a => order.includes(a.property) || order.push(a.property));
+      const params = { action: 'wbsetreference', statement: p.claim.id, reference: p.ref.hash,
+                       snaks: JSON.stringify(snaks), 'snaks-order': JSON.stringify(order),
+                       baserevid: revids[p.item] ?? p.revid, summary: $('summary').value, maxlag: 5,
+                       bot: 0, token: csrf };
+      let attempt = 0;
+      while (true) {
+        try {
+          const d = await apiAuth(params, true);
+          revids[p.item] = d.pageinfo?.lastrevid ?? revids[p.item];
+          p.done = true; ok++;
+          p.result = `<span class="ok">✓ <a href="https://www.wikidata.org/w/index.php?diff=${d.pageinfo?.lastrevid}" target="_blank">diff</a></span>`;
+          break;
+        } catch (e) {
+          if (e.code === 'maxlag' && attempt++ < 5) { status('Server lag, waiting…'); await sleep(5000); continue; }
+          if (e.code === 'badtoken' && attempt++ < 1) {
+            csrf = params.token = (await apiAuth({ action: 'query', meta: 'tokens', type: 'csrf' })).query.tokens.csrftoken; continue;
+          }
+          if (e.code === 'ratelimited' && attempt++ < 5) { status('Rate limited, waiting…'); await sleep(30000); continue; }
+          fail++; p.result = `<span class="err">✗ ${esc(e.message)}</span>`;
+          break;
+        }
+      }
+      $('res' + i).innerHTML = p.result;
+      status(`${n + 1}/${todo.length} — ${ok} done, ${fail} failed`);
+      await sleep(1000);
+    }
+    status(`${stopFlag ? 'Stopped. ' : 'Finished. '}${ok} edited, ${fail} failed.`);
+  } catch (e) { status('Error: ' + e.message); }
+  finally { $('apply').disabled = false; $('stopApply').disabled = true; }
+}
+
+// ---------- wiring ----------
+$('scan').onclick = scan;
+$('stop').onclick = $('stopApply').onclick = () => { stopFlag = true; };
+$('apply').onclick = apply;
+$('check').onclick = checkToken;
+$('selAll').onchange = e => { plan.forEach(p => p.selected = e.target.checked); render(); };
+$('remember').onchange = e => { if (!e.target.checked) localStorage.removeItem('wdRefFixerToken'); };
+try { const t = localStorage.getItem('wdRefFixerToken'); if (t) { $('token').value = t; $('remember').checked = true; } } catch {}
+
+// Prefill from ?url=…&adds=…&summary=…
+const qp = new URLSearchParams(location.search);
+if (qp.get('url')) $('url').value = qp.get('url');
+if (qp.get('adds')) $('adds').value = qp.get('adds');
+if (qp.get('summary')) $('summary').value = qp.get('summary');
+</script>
+</body>
+</html>

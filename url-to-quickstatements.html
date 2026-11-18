@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference URL → QuickStatements</title>
+<style>
+  :root { --fg:#1d2433; --muted:#5b6475; --line:#d7dce5; --accent:#3366cc; --bg:#f7f8fa; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg);
+         background: var(--bg); margin: 0; padding: 2rem 1rem; }
+  main { max-width: 860px; margin: 0 auto; background: #fff; border: 1px solid var(--line);
+         border-radius: 10px; padding: 1.5rem 2rem 2rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  label { display: block; font-weight: 600; margin: 1.1rem 0 .3rem; }
+  .hint { font-weight: 400; color: var(--muted); font-size: .88rem; }
+  input[type=text], textarea { width: 100%; padding: .55rem .65rem; border: 1px solid var(--line);
+         border-radius: 6px; font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  textarea { resize: vertical; }
+  .checks { margin-top: 1rem; display: grid; gap: .35rem; }
+  .checks label { font-weight: 400; margin: 0; display: flex; gap: .5rem; align-items: baseline; }
+  .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1.3rem; align-items: center; }
+  button, a.btn { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: .55rem 1rem;
+         font: inherit; cursor: pointer; text-decoration: none; display: inline-block; }
+  button.secondary, a.btn.secondary { background: #eef1f6; color: var(--fg); }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { color: var(--muted); font-size: .9rem; }
+  #output { min-height: 14rem; margin-top: .5rem; white-space: pre; }
+  details { margin-top: 1rem; }
+  summary { cursor: pointer; color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; margin-top: .5rem; }
+  td, th { border-bottom: 1px solid var(--line); padding: .3rem .4rem; text-align: left; vertical-align: top; }
+  td.url { word-break: break-all; color: var(--muted); }
+  .skip { color: #a15c00; }
+  nav.back { max-width: 860px; margin: 0 auto .6rem; font-size: .9rem; } nav.back a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<nav class="back"><a href="index.html">← All tools</a></nav>
+<main>
+  <h1>Reference URL → QuickStatements</h1>
+  <p class="lead">Finds Wikidata items that cite a URL (or any page under it) and generates QuickStatements
+    that add fixed property/value pairs to them — e.g. <em>described by source</em> (P1343) for people found in an nb.no book.</p>
+
+  <label for="url">URL prefix <span class="hint">— every reference URL starting with this matches</span></label>
+  <input type="text" id="url" placeholder="https://www.nb.no/items/URN:NBN:no-nb_digibok_2008012404027">
+
+  <label for="pairs">Statements to add <span class="hint">— one per line: property, value, optional qualifiers (tab, | or space separated)</span></label>
+  <textarea id="pairs" rows="3" placeholder="P1343|Q12345">P1343|Q</textarea>
+
+  <div class="checks">
+    <label><input type="checkbox" id="onlyHumans" checked> Only items that are instance of human (P31 = Q5)</label>
+    <label><input type="checkbox" id="skipExisting" checked> Skip items that already have the statement</label>
+    <label><input type="checkbox" id="addRef" checked> Add the matched URL as reference (S854)</label>
+  </div>
+
+  <div class="row">
+    <button id="run">Find items</button>
+    <span id="status"></span>
+  </div>
+
+  <label for="output">QuickStatements (v1)</label>
+  <textarea id="output" rows="14" readonly></textarea>
+
+  <div class="row">
+    <a id="openQs" class="btn" target="_blank" rel="noopener">Open in QuickStatements</a>
+    <button id="copy" class="secondary">Copy</button>
+    <button id="download" class="secondary">Download .txt</button>
+    <button id="share" class="secondary">Copy link to this setup</button>
+  </div>
+
+  <details id="detailsBox">
+    <summary>Matched items</summary>
+    <table><thead><tr><th>Item</th><th>Label</th><th>Matched URL(s)</th><th></th></tr></thead>
+      <tbody id="matches"></tbody></table>
+  </details>
+</main>
+
+<script>
+const API = 'https://www.wikidata.org/w/api.php';
+const $ = id => document.getElementById(id);
+
+async function api(params) {
+  const u = new URL(API);
+  for (const [k, v] of Object.entries({ ...params, format: 'json', formatversion: 2, origin: '*' }))
+    u.searchParams.set(k, v);
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`API error ${r.status}`);
+  const d = await r.json();
+  if (d.error) throw new Error(d.error.info || d.error.code);
+  return d;
+}
+
+function parsePairs(text) {
+  return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const toks = /[\t|]/.test(l) ? l.split(/\s*[\t|]\s*/) : l.split(/\s+/);
+    if (toks.length < 2 || !/^P\d+$/i.test(toks[0])) throw new Error(`Bad statement line: "${l}"`);
+    toks[0] = toks[0].toUpperCase();
+    if (/^q\d+$/i.test(toks[1])) toks[1] = toks[1].toUpperCase();
+    return toks;
+  });
+}
+
+// Strip protocol, lowercase for comparison.
+const norm = u => u.replace(/^[a-z]+:\/\//i, '').toLowerCase();
+
+// All pages in main namespace linking to URLs under the prefix (uses the externallinks index,
+// which includes URLs used in statements and references).
+async function findLinks(prefix, onProgress) {
+  const m = prefix.match(/^([a-z]+):\/\/(.*)$/i);
+  const protocols = m ? [m[1].toLowerCase()] : ['https', 'http'];
+  const query = m ? m[2] : prefix;
+  const want = norm(query);
+  const byItem = new Map();
+  for (const protocol of protocols) {
+    let cont = { continue: '' };
+    while (cont) {
+      const d = await api({ action: 'query', list: 'exturlusage', euquery: query, euprotocol: protocol,
+                            eunamespace: 0, eulimit: 500, euprop: 'title|url', ...cont });
+      for (const e of d.query.exturlusage) {
+        if (!norm(e.url).startsWith(want)) continue;
+        if (!byItem.has(e.title)) byItem.set(e.title, new Set());
+        byItem.get(e.title).add(e.url);
+      }
+      onProgress(byItem.size);
+      cont = d.continue || null;
+    }
+  }
+  return byItem;
+}
+
+async function getEntities(ids, onProgress) {
+  const out = {};
+  for (let i = 0; i < ids.length; i += 50) {
+    const d = await api({ action: 'wbgetentities', ids: ids.slice(i, i + 50).join('|'),
+                          props: 'claims|labels', languages: 'nb|nn|en' });
+    Object.assign(out, d.entities);
+    onProgress(Math.min(i + 50, ids.length), ids.length);
+  }
+  return out;
+}
+
+const claimValues = (ent, prop) => (ent.claims?.[prop] || []).map(c => {
+  const v = c.mainsnak?.datavalue?.value;
+  return v == null ? null : typeof v === 'object' ? (v.id ?? JSON.stringify(v)) : String(v);
+});
+const stripQuotes = s => s.replace(/^"(.*)"$/, '$1');
+const label = ent => { const l = ent.labels || {}; return (l.nb || l.nn || l.en || {}).value || ''; };
+
+let lastOutput = '';
+
+async function run() {
+  const prefix = $('url').value.trim();
+  if (!prefix) return alert('Enter a URL prefix.');
+  let pairs;
+  try { pairs = parsePairs($('pairs').value); } catch (e) { return alert(e.message); }
+  if (!pairs.length) return alert('Add at least one statement line.');
+  if (pairs.some(p => /^Q$/i.test(p[1]))) return alert('Fill in the item ID (e.g. P1343|Q12345).');
+
+  const btn = $('run'); btn.disabled = true;
+  const status = s => $('status').textContent = s;
+  $('matches').innerHTML = ''; setOutput('');
+  try {
+    status('Searching reference URLs…');
+    const byItem = await findLinks(prefix, n => status(`Searching reference URLs… ${n} items`));
+    const ids = [...byItem.keys()].filter(t => /^Q\d+$/.test(t));
+    if (!ids.length) { status('No items found.'); return; }
+
+    const ents = await getEntities(ids, (a, b) => status(`Checking items… ${a}/${b}`));
+    const lines = [], rows = [];
+    let kept = 0;
+    for (const id of ids) {
+      const ent = ents[id] || {};
+      const urls = [...byItem.get(id)];
+      let reason = '';
+      if ($('onlyHumans').checked && !claimValues(ent, 'P31').includes('Q5')) reason = 'not human';
+      const todo = reason ? [] : pairs.filter(([p, v]) =>
+        !($('skipExisting').checked && claimValues(ent, p).includes(stripQuotes(v))));
+      if (!reason && !todo.length) reason = 'already has statement';
+      if (!reason) {
+        kept++;
+        for (const pair of todo) {
+          let line = [id, ...pair].join('\t');
+          if ($('addRef').checked) line += '\tS854\t"' + urls[0].replace(/"/g, '%22') + '"';
+          lines.push(line);
+        }
+      }
+      rows.push(`<tr${reason ? ' class="skip"' : ''}><td><a href="https://www.wikidata.org/wiki/${id}" target="_blank">${id}</a></td>`
+        + `<td>${esc(label(ent))}</td><td class="url">${urls.map(esc).join('<br>')}</td><td>${reason ? 'skipped: ' + reason : ''}</td></tr>`);
+    }
+    $('matches').innerHTML = rows.join('');
+    $('detailsBox').open = true;
+    setOutput(lines.join('\n'));
+    status(`${ids.length} items cite this URL; ${kept} get statements (${lines.length} lines).`);
+  } catch (e) {
+    status('Error: ' + e.message);
+  } finally { btn.disabled = false; }
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function setOutput(text) {
+  lastOutput = text;
+  $('output').value = text;
+  const qs = text.replace(/\t/g, '|').replace(/\n/g, '||');
+  $('openQs').href = 'https://quickstatements.toolforge.org/#/v1=' + encodeURIComponent(qs);
+  $('openQs').style.pointerEvents = text ? '' : 'none';
+  $('openQs').style.opacity = text ? '' : '.5';
+}
+
+$('run').onclick = run;
+$('copy').onclick = () => navigator.clipboard.writeText(lastOutput);
+$('download').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lastOutput + '\n'], { type: 'text/plain' }));
+  a.download = 'quickstatements.txt'; a.click();
+};
+$('share').onclick = () => {
+  const u = new URL(location.href.split('?')[0]);
+  u.searchParams.set('url', $('url').value.trim());
+  u.searchParams.set('pairs', $('pairs').value.trim());
+  navigator.clipboard.writeText(u.toString());
+  $('status').textContent = 'Link copied.';
+};
+
+// Prefill from ?url=…&pairs=… (pairs: newline-separated) and auto-run if both given.
+const qp = new URLSearchParams(location.search);
+if (qp.get('url')) $('url').value = qp.get('url');
+if (qp.get('pairs')) $('pairs').value = qp.get('pairs');
+setOutput('');
+if (qp.get('url') && qp.get('pairs')) run();
+</script>
+</body>
+</html>
