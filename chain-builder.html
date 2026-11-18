@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chain builder — follows / followed by</title>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15/Sortable.min.js"></script>
+<style>
+  :root { --fg:#1d2433; --muted:#5b6475; --line:#d7dce5; --accent:#3366cc; --bg:#f7f8fa;
+          --ok:#1e6b34; --okbg:#e6f4ea; --new:#3366cc; --newbg:#e8effc; --warn:#a15c00; --warnbg:#fdf1de; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg);
+         background: var(--bg); margin: 0; padding: 2rem 1rem; }
+  main { max-width: 900px; margin: 0 auto; background: #fff; border: 1px solid var(--line);
+         border-radius: 10px; padding: 1.5rem 2rem 2rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 1.8rem 0 .3rem; border-top: 1px solid var(--line); padding-top: 1.2rem; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  label { display: block; font-weight: 600; margin: 1rem 0 .3rem; }
+  .hint { font-weight: 400; color: var(--muted); font-size: .88rem; }
+  input[type=text], textarea, select { padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 6px;
+         font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  textarea { width: 100%; resize: vertical; }
+  input.short { width: 7.5rem; }
+  .settings { display: flex; flex-wrap: wrap; gap: .3rem 1.5rem; align-items: end; }
+  .settings label { margin-top: .6rem; }
+  .radios label { font-weight: 400; display: inline-flex; gap: .35rem; margin: .3rem 1.2rem 0 0; }
+  .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; align-items: center; }
+  button, a.btn { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: .5rem .95rem;
+         font: inherit; cursor: pointer; text-decoration: none; display: inline-block; }
+  button.secondary, a.btn.secondary { background: #eef1f6; color: var(--fg); }
+  button.icon { background: none; color: var(--muted); padding: .1rem .45rem; font-size: .9rem; white-space: nowrap; }
+  button.icon:hover { color: var(--fg); background: #eef1f6; }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { color: var(--muted); font-size: .9rem; }
+
+  ul.list { list-style: none; margin: .5rem 0 0; padding: 0; min-height: 3rem; border-radius: 8px; }
+  ul#excluded { background: #f2f3f6; padding: .4rem; }
+  ul#excluded:empty::before { content: 'Drag items here to leave them out of the chain'; color: var(--muted);
+         font-size: .88rem; padding: .5rem; display: block; }
+  li.block { background: #fff; border: 1px solid var(--line); border-radius: 8px; margin: .35rem 0; overflow: hidden; }
+  li.block.locked { border-color: #9cc5a8; box-shadow: inset 3px 0 0 #9cc5a8; }
+  li.brk { background: repeating-linear-gradient(45deg, #fafafa, #fafafa 6px, #f0f1f4 6px, #f0f1f4 12px);
+           display: flex; align-items: center; gap: .6rem; padding: .35rem .6rem; flex-wrap: wrap; }
+  li.brk select { padding: .2rem .4rem; font: inherit; font-size: .88rem; }
+  .item { display: flex; align-items: flex-start; gap: .5rem; padding: .4rem .6rem; }
+  .handle { cursor: grab; color: #9aa3b2; user-select: none; padding: 0 .2rem; font-size: 1.1rem; line-height: 1.4; }
+  .main { flex: 1; min-width: 0; }
+  .main a { color: var(--fg); font-weight: 600; text-decoration: none; }
+  .main a:hover { text-decoration: underline; }
+  .qid { color: var(--muted); font-size: .85rem; margin-left: .3rem; font-weight: 400; }
+  .extra { color: var(--muted); font-size: .85rem; }
+  .ext { font-size: .8rem; color: var(--warn); }
+  .badge { font-size: .78rem; padding: .05rem .55rem; margin-left: 2.3rem; border-radius: 0 0 6px 6px; display: inline-block; }
+  .b-ok { background: var(--okbg); color: var(--ok); }
+  .b-new { background: var(--newbg); color: var(--new); }
+  .b-warn { background: var(--warnbg); color: var(--warn); }
+  .b-none { background: #eceef2; color: var(--muted); }
+  #excluded .badge { display: none; }
+  .sortable-ghost { opacity: .35; }
+  #output { min-height: 12rem; white-space: pre; margin-top: .4rem; }
+  .legend span { margin-right: .5rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chain builder</h1>
+  <p class="lead">Load items with SPARQL, drag them into order, and get QuickStatements for <em>follows</em> / <em>followed by</em>.
+    Items that are already linked on Wikidata are locked together, and breaks mark gaps or uncertain links.
+    <a href="index.html">Other tools</a></p>
+
+  <label for="query">SPARQL query <span class="hint">— must return <code>?item</code>. <code>?itemLabel</code> and any other columns
+    are shown to help with ordering. The query's ORDER BY sets the starting order.</span></label>
+  <textarea id="query" rows="7" spellcheck="false">SELECT ?item ?itemLabel ?date WHERE {
+  ?item wdt:P179 wd:Q123 .
+  OPTIONAL { ?item wdt:P577 ?date }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "nb,nn,en,mul". }
+}
+ORDER BY ?date</textarea>
+
+  <div class="radios" style="margin-top:1rem">
+    <strong style="margin-right:1rem">Where the links go:</strong>
+    <label><input type="radio" name="mode" value="item" checked> On the items</label>
+    <label><input type="radio" name="mode" value="qual"> As qualifiers on a statement</label>
+  </div>
+  <div class="settings">
+    <div><label for="prevP">“Follows” property</label><input type="text" id="prevP" class="short" value="P155"></div>
+    <div><label for="nextP">“Followed by” property</label><input type="text" id="nextP" class="short" value="P156"></div>
+    <div class="qualOnly"><label for="stmtP">Statement property</label><input type="text" id="stmtP" class="short" value="P179"></div>
+    <div class="qualOnly"><label for="stmtV">Statement value</label><input type="text" id="stmtV" class="short" placeholder="Q…"></div>
+  </div>
+  <p class="hint qualOnly">Examples: books in a series → P179 = series, with P155/P156. Office holders → P39 = office, with P1365/P1366.</p>
+
+  <div class="row">
+    <button id="load">Load items</button>
+    <span id="loadStatus" class="status"></span>
+  </div>
+
+  <section id="work" hidden>
+    <h2>Order</h2>
+    <p class="hint legend">
+      <span class="badge b-ok" style="margin:0">✓ exists</span>
+      <span class="badge b-new" style="margin:0">+ will be added</span>
+      <span class="badge b-warn" style="margin:0">⚠ conflict, skipped</span>
+      — Green-edged blocks are already linked on Wikidata and move together.</p>
+    <div class="row" style="margin-top:.3rem">
+      <button id="addBreak" class="secondary">+ Add break at top</button>
+      <button id="reset" class="secondary">Reset to query order</button>
+      <span id="summary" class="status"></span>
+    </div>
+    <ul id="chain" class="list"></ul>
+
+    <h2>Left out</h2>
+    <ul id="excluded" class="list"></ul>
+
+    <h2>QuickStatements</h2>
+    <textarea id="output" rows="12" readonly></textarea>
+    <div class="row">
+      <a id="openQs" class="btn" target="_blank" rel="noopener">Open in QuickStatements</a>
+      <button id="copy" class="secondary">Copy</button>
+      <button id="download" class="secondary">Download .txt</button>
+      <button id="share" class="secondary">Copy link to this setup</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const SOME = '?', NONE = '∅';   // markers for "unknown value" / "no value"
+
+let S = null;   // { cfg, items: {id: {...}}, order: [ids], labels: {}, blocks: Map, chain: [keys], excluded: [keys] }
+let keySeq = 0;
+const newKey = () => 'k' + (++keySeq);
+
+// ---------- config ----------
+function readCfg() {
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const cfg = { mode, prev: $('prevP').value.trim().toUpperCase(), next: $('nextP').value.trim().toUpperCase(),
+                sp: $('stmtP').value.trim().toUpperCase(), sv: $('stmtV').value.trim().toUpperCase() };
+  for (const p of [cfg.prev, cfg.next, ...(mode === 'qual' ? [cfg.sp] : [])])
+    if (!/^P\d+$/.test(p)) throw new Error(`"${p}" is not a property ID`);
+  if (mode === 'qual' && !/^Q\d+$/.test(cfg.sv)) throw new Error('Statement value must be an item ID (Q…)');
+  return cfg;
+}
+function syncModeUi() {
+  const q = document.querySelector('input[name=mode]:checked').value === 'qual';
+  document.querySelectorAll('.qualOnly').forEach(e => e.style.display = q ? '' : 'none');
+}
+document.querySelectorAll('input[name=mode]').forEach(r => r.onchange = syncModeUi);
+
+// ---------- loading ----------
+async function sparql(q) {
+  const r = await fetch('https://query.wikidata.org/sparql', {
+    method: 'POST', body: new URLSearchParams({ query: q }),
+    headers: { Accept: 'application/sparql-results+json' } });
+  if (!r.ok) throw new Error(`SPARQL error ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  return r.json();
+}
+async function wbget(ids, props) {
+  const out = {};
+  for (let i = 0; i < ids.length; i += 50) {
+    const u = new URL('https://www.wikidata.org/w/api.php');
+    Object.entries({ action: 'wbgetentities', ids: ids.slice(i, i + 50).join('|'), props,
+                     languages: 'nb|nn|en|mul', format: 'json', origin: '*' }).forEach(([k, v]) => u.searchParams.set(k, v));
+    const d = await (await fetch(u)).json();
+    if (d.error) throw new Error(d.error.info);
+    Object.assign(out, d.entities);
+  }
+  return out;
+}
+const pickLabel = ent => { const l = ent?.labels || {}; return (l.nb || l.nn || l.en || l.mul || {}).value || ''; };
+const snakVal = s => s.snaktype === 'somevalue' ? SOME : s.snaktype === 'novalue' ? NONE : s.datavalue?.value?.id;
+const qid = uri => (uri.match(/entity\/(Q\d+)$/) || [])[1];
+
+function fmtCell(b) {
+  if (!b) return '';
+  if (b.type === 'uri') return qid(b.value) || b.value;
+  if (b.datatype?.endsWith('#dateTime')) return b.value.replace(/^\+?(-?\d+-\d\d-\d\d).*/, '$1');
+  return b.value;
+}
+
+async function load() {
+  let cfg;
+  try { cfg = readCfg(); } catch (e) { return alert(e.message); }
+  const status = s => $('loadStatus').textContent = s;
+  $('load').disabled = true;
+  try {
+    status('Running query…');
+    const res = await sparql($('query').value);
+    const vars = res.head.vars.filter(v => v !== 'item' && v !== 'itemLabel');
+    const items = {}, order = [];
+    for (const b of res.results.bindings) {
+      const id = b.item && qid(b.item.value);
+      if (!id) continue;
+      if (!items[id]) {
+        items[id] = { id, label: b.itemLabel?.value && b.itemLabel.value !== id ? b.itemLabel.value : '', extra: {} };
+        order.push(id);
+      }
+      for (const v of vars) {
+        const t = fmtCell(b[v]);
+        if (t) (items[id].extra[v] ||= new Set()).add(t);
+      }
+    }
+    if (!order.length) throw new Error('The query returned no ?item values.');
+
+    status(`Reading existing links for ${order.length} items…`);
+    const ents = await wbget(order, 'claims|labels');
+    const outside = new Set();
+    for (const id of order) {
+      const it = items[id], ent = ents[id] || {};
+      it.label ||= pickLabel(ent);
+      let src = ent.claims || {};
+      it.stmtCount = 1;
+      if (cfg.mode === 'qual') {
+        const stmts = (src[cfg.sp] || []).filter(c => c.mainsnak.datavalue?.value?.id === cfg.sv);
+        it.stmtCount = stmts.length;
+        src = stmts[0]?.qualifiers || {};
+      }
+      it.prev = (src[cfg.prev] || []).map(snakVal).filter(Boolean);
+      it.next = (src[cfg.next] || []).map(snakVal).filter(Boolean);
+      [...it.prev, ...it.next].forEach(v => /^Q/.test(v) && !items[v] && outside.add(v));
+    }
+    const labels = {};
+    order.forEach(id => labels[id] = items[id].label);
+    if (outside.size) {
+      const oe = await wbget([...outside], 'labels');
+      for (const id of outside) labels[id] = pickLabel(oe[id]);
+    }
+    S = { cfg, items, order, labels, vars };
+    buildBlocks();
+    $('work').hidden = false;
+    status(`${order.length} items loaded.`);
+  } catch (e) {
+    status('Error: ' + e.message);
+  } finally { $('load').disabled = false; }
+}
+
+// Group items that are already linked into locked blocks, placed by their first member in query order.
+function buildBlocks() {
+  const { items, order } = S;
+  const succ = {}, pred = {};
+  order.forEach(id => { succ[id] = new Set(); pred[id] = new Set(); });
+  for (const a of order) {
+    for (const b of items[a].next) if (items[b] && b !== a) { succ[a].add(b); pred[b].add(a); }
+    for (const b of items[a].prev) if (items[b] && b !== a) { pred[a].add(b); succ[b].add(a); }
+  }
+  const one = set => set.size === 1 ? [...set][0] : null;
+  const visited = new Set();
+  S.blocks = new Map(); S.chain = []; S.excluded = [];
+  for (const id of order) {
+    if (visited.has(id)) continue;
+    let h = id; const back = new Set([h]);
+    for (let p = one(pred[h]); p && !visited.has(p) && !back.has(p) && one(succ[p]) === h; p = one(pred[h])) { h = p; back.add(h); }
+    const members = [];
+    for (let c = h; c && !visited.has(c); ) {
+      visited.add(c); members.push(c);
+      const n = one(succ[c]);
+      c = n && one(pred[n]) === c ? n : null;
+    }
+    const key = newKey();
+    S.blocks.set(key, { type: 'chain', items: members });
+    S.chain.push(key);
+  }
+  render();
+}
+
+// ---------- analysis: links between neighbours ----------
+function analyze() {
+  const { items, cfg, labels } = S;
+  const seq = [];
+  for (const key of S.chain) {
+    const b = S.blocks.get(key);
+    if (b.type === 'break') seq.push({ kind: 'break', key, mode: b.mode });
+    else b.items.forEach(id => seq.push({ kind: 'item', id, key }));
+  }
+  const lines = [], badgeItem = {}, badgeBreak = {};
+  const name = id => id === SOME ? 'unknown value' : id === NONE ? 'no value' : `${labels[id] || id}`;
+  const stmt = (subj, prop, val) => cfg.mode === 'qual'
+    ? [subj, cfg.sp, cfg.sv, prop, val].join('\t') : [subj, prop, val].join('\t');
+  const qsVal = v => v === SOME ? 'somevalue' : v;
+
+  // Add value `val` on side `prop` of item `subj` unless it is there already; report the result.
+  function side(subj, prop, val) {
+    const have = prop === cfg.prev ? items[subj].prev : items[subj].next;
+    if (have.includes(val)) return { st: 'ok' };
+    if (val === SOME && have.length) return { st: 'ok' };          // a real or unknown value already set
+    if (have.length) return { st: 'warn', msg: `${name(subj)} already has ${prop} = ${have.map(name).join(', ')}` };
+    return { st: 'new', line: stmt(subj, prop, qsVal(val)) };
+  }
+  // Commit the new statements of a link only if no side conflicts.
+  function commit(parts) {
+    if (!parts.some(p => p.st === 'warn')) parts.forEach(p => p.line && lines.push(p.line));
+    return parts;
+  }
+  function badge(parts) {
+    const warn = parts.filter(p => p.st === 'warn');
+    if (warn.length) return `<span class="badge b-warn">⚠ ${esc(warn.map(w => w.msg).join('; '))} (skipped)</span>`;
+    if (parts.every(p => p.st === 'ok')) return `<span class="badge b-ok">✓ linked</span>`;
+    if (parts.some(p => p.st === 'ok')) return `<span class="badge b-new">+ completing link (one side existed)</span>`;
+    return `<span class="badge b-new">+ new link</span>`;
+  }
+
+  for (let i = 0; i < seq.length - 1; i++) {
+    const a = seq[i], b = seq[i + 1];
+    if (a.kind === 'item' && b.kind === 'item') {
+      badgeItem[b.id] = badge(commit([side(a.id, cfg.next, b.id), side(b.id, cfg.prev, a.id)]));
+    } else if (a.kind === 'item' && b.kind === 'break' && b.mode === 'unknown') {
+      (badgeBreak[b.key] ||= []).push(...commit([side(a.id, cfg.next, SOME)]));
+    } else if (a.kind === 'break' && a.mode === 'unknown' && b.kind === 'item') {
+      (badgeBreak[a.key] ||= []).push(...commit([side(b.id, cfg.prev, SOME)]));
+    }
+  }
+  for (const k in badgeBreak) {
+    const w = badgeBreak[k].filter(p => p.st === 'warn');
+    badgeBreak[k] = w.length ? `⚠ ${w.map(x => x.msg).join('; ')}` : '';
+  }
+  return { lines, badgeItem, badgeBreak };
+}
+
+// ---------- rendering ----------
+function itemHtml(id, badge, inChain) {
+  const it = S.items[id], { cfg, labels } = S;
+  const extra = Object.entries(it.extra).map(([k, v]) => `${esc(k)}: ${esc([...v].join(', '))}`).join(' · ');
+  const notes = [];
+  const outside = v => v !== SOME && v !== NONE && !S.items[v];
+  it.prev.filter(outside).forEach(v => notes.push(`← follows ${esc(labels[v] || v)} (${v}, not loaded)`));
+  it.next.filter(outside).forEach(v => notes.push(`→ followed by ${esc(labels[v] || v)} (${v}, not loaded)`));
+  if (cfg.mode === 'qual' && it.stmtCount === 0) notes.push(`no ${cfg.sp} = ${cfg.sv} statement — it will be created`);
+  if (cfg.mode === 'qual' && it.stmtCount > 1) notes.push(`${it.stmtCount} matching statements — QuickStatements picks one`);
+  return `${badge && inChain ? badge : ''}<div class="item">
+      <span class="handle" title="Drag">⠿</span>
+      <div class="main"><a href="https://www.wikidata.org/wiki/${id}" target="_blank">${esc(it.label || id)}</a><span class="qid">${id}</span>
+        ${extra ? `<div class="extra">${extra}</div>` : ''}
+        ${notes.map(n => `<div class="ext">${n}</div>`).join('')}</div>
+    </div>`;
+}
+
+function blockHtml(key, inChain, an) {
+  const b = S.blocks.get(key);
+  if (b.type === 'break') {
+    const warn = an.badgeBreak[key];
+    return `<li class="block brk" data-key="${key}"><span class="handle">⠿</span>
+      <strong>Break</strong>
+      <select data-act="mode"><option value="none"${b.mode === 'none' ? ' selected' : ''}>gap — add nothing</option>
+        <option value="unknown"${b.mode === 'unknown' ? ' selected' : ''}>unknown item — add “unknown value” to neighbours</option></select>
+      ${warn ? `<span class="ext">${esc(warn)}</span>` : ''}
+      <span style="flex:1"></span><button class="icon" data-act="del" title="Remove break">✕</button></li>`;
+  }
+  const locked = b.items.length > 1;
+  const tools = `<div style="display:flex;justify-content:flex-end;gap:.2rem;padding:0 .4rem .3rem">
+      <button class="icon" data-act="brk" title="Insert a break below">+ break below</button>
+      ${inChain ? `<button class="icon" data-act="out" title="Leave out of chain">leave out</button>`
+                : `<button class="icon" data-act="in" title="Put back at end of chain">put back</button>`}</div>`;
+  return `<li class="block${locked ? ' locked' : ''}" data-key="${key}" ${locked ? 'title="Already linked on Wikidata — moves as one block"' : ''}>
+    ${b.items.map(id => itemHtml(id, an.badgeItem[id], inChain)).join('')}${tools}</li>`;
+}
+
+function render() {
+  const an = analyze();
+  $('chain').innerHTML = S.chain.map(k => blockHtml(k, true, an)).join('');
+  $('excluded').innerHTML = S.excluded.map(k => blockHtml(k, false, an)).join('');
+  setOutput(an.lines.join('\n'));
+  const n = S.chain.reduce((a, k) => a + (S.blocks.get(k).items?.length || 0), 0);
+  $('summary').textContent = `${n} items in chain, ${an.lines.length} statements to add`;
+}
+
+function syncFromDom() {
+  S.chain = [...$('chain').children].map(li => li.dataset.key);
+  S.excluded = [...$('excluded').children].map(li => li.dataset.key);
+  render();
+}
+
+// ---------- interactions ----------
+for (const el of ['chain', 'excluded'])
+  Sortable.create($(el), { group: 'chain', handle: '.handle', animation: 120, onEnd: syncFromDom });
+
+function onListClick(e) {
+  const btn = e.target.closest('[data-act]');
+  if (!btn || btn.tagName === 'SELECT') return;
+  const key = btn.closest('li').dataset.key;
+  const list = btn.closest('ul').id === 'chain' ? S.chain : S.excluded;
+  const i = list.indexOf(key);
+  switch (btn.dataset.act) {
+    case 'del': list.splice(i, 1); S.blocks.delete(key); break;
+    case 'brk': { const k = newKey(); S.blocks.set(k, { type: 'break', mode: 'none' });
+                  if (list === S.chain) S.chain.splice(i + 1, 0, k); else S.chain.push(k); break; }
+    case 'out': S.chain.splice(i, 1); S.excluded.push(key); break;
+    case 'in': S.excluded.splice(i, 1); S.chain.push(key); break;
+  }
+  render();
+}
+$('chain').onclick = $('excluded').onclick = onListClick;
+$('chain').onchange = e => {
+  if (e.target.dataset.act !== 'mode') return;
+  S.blocks.get(e.target.closest('li').dataset.key).mode = e.target.value;
+  render();
+};
+$('addBreak').onclick = () => { const k = newKey(); S.blocks.set(k, { type: 'break', mode: 'none' }); S.chain.unshift(k); render(); };
+$('reset').onclick = () => { if (confirm('Discard your ordering and breaks?')) buildBlocks(); };
+$('load').onclick = load;
+
+// ---------- output ----------
+let lastOutput = '';
+function setOutput(text) {
+  lastOutput = text;
+  $('output').value = text;
+  $('openQs').href = 'https://quickstatements.toolforge.org/#/v1=' + encodeURIComponent(text.replace(/\t/g, '|').replace(/\n/g, '||'));
+  $('openQs').style.pointerEvents = text ? '' : 'none';
+  $('openQs').style.opacity = text ? '' : '.5';
+}
+$('copy').onclick = () => navigator.clipboard.writeText(lastOutput);
+$('download').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lastOutput + '\n'], { type: 'text/plain' }));
+  a.download = 'chain-quickstatements.txt'; a.click();
+};
+$('share').onclick = () => {
+  const u = new URL(location.href.split('?')[0]);
+  u.searchParams.set('query', $('query').value);
+  const c = readCfg();
+  u.searchParams.set('mode', c.mode); u.searchParams.set('prev', c.prev); u.searchParams.set('next', c.next);
+  if (c.mode === 'qual') { u.searchParams.set('sp', c.sp); u.searchParams.set('sv', c.sv); }
+  navigator.clipboard.writeText(u.toString());
+  $('loadStatus').textContent = 'Link copied (query and settings; the ordering is not included).';
+};
+
+// Prefill from URL: ?query=…&mode=qual&prev=P155&next=P156&sp=P179&sv=Q…
+const qp = new URLSearchParams(location.search);
+if (qp.get('query')) $('query').value = qp.get('query');
+if (qp.get('mode') === 'qual') document.querySelector('input[name=mode][value=qual]').checked = true;
+[['prev', 'prevP'], ['next', 'nextP'], ['sp', 'stmtP'], ['sv', 'stmtV']].forEach(([k, id]) => qp.get(k) && ($(id).value = qp.get(k)));
+syncModeUi();
+</script>
+</body>
+</html>
